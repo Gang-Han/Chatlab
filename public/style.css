@@ -186,6 +186,35 @@ body {
   color: var(--text-muted);
 }
 
+.other-chats-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.other-chats-header:hover {
+  background: var(--sidebar-item-hover);
+}
+
+.other-chats-header .conversation-group-label {
+  margin: 0;
+  padding: 0;
+}
+
+.other-chats-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.other-chats-list[hidden] {
+  display: none;
+}
+
 .project-group {
   display: flex;
   flex-direction: column;
@@ -199,13 +228,23 @@ body {
   gap: 6px;
   padding: 6px 10px;
   border-radius: 8px;
+  cursor: pointer;
 }
 
 .project-header:hover {
   background: var(--sidebar-item-hover);
 }
 
+.project-chevron {
+  flex: 0 0 auto;
+  width: 12px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 .project-name {
+  flex: 1 1 auto;
   font-size: 0.85rem;
   font-weight: 600;
   overflow: hidden;
@@ -257,13 +296,18 @@ body {
   padding-left: 10px;
 }
 
+.project-conversations[hidden] {
+  display: none;
+}
+
 .conversation-row {
   display: flex;
   align-items: center;
   gap: 2px;
 }
 
-.conversation-row:hover .conversation-delete {
+.conversation-row:hover .kebab-btn,
+.project-header:hover .kebab-btn {
   opacity: 1;
 }
 
@@ -289,13 +333,29 @@ body {
   font-weight: 600;
 }
 
-.conversation-delete {
+.inline-rename-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+
+.kebab-menu {
+  position: relative;
   flex: 0 0 auto;
+}
+
+.kebab-btn {
   border: none;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 1rem;
   width: 22px;
   height: 22px;
   border-radius: 6px;
@@ -304,10 +364,48 @@ body {
   transition: opacity 0.15s ease;
 }
 
-.conversation-delete:hover {
+.kebab-btn:hover {
   background: var(--sidebar-active);
+  color: var(--text);
+}
+
+.kebab-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  min-width: 120px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.kebab-dropdown[hidden] {
+  display: none;
+}
+
+.kebab-item {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.kebab-item:hover {
+  background: var(--sidebar-item-hover);
+}
+
+.kebab-item.destructive {
   color: var(--error);
-  opacity: 1;
 }
 
 .conversation-empty {

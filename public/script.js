@@ -37,13 +37,34 @@ try {
 } catch (err) {
   projects = [];
 }
+
+// Migrate the old manual `summary` field to `projectBackground`, and add the new
+// automatic `projectRollingSummary` layer. Persist immediately so the rename sticks.
+let migratedProjects = false;
 projects.forEach((p) => {
-  if (typeof p.summary !== 'string') p.summary = '';
+  if (typeof p.projectBackground !== 'string') {
+    p.projectBackground = typeof p.summary === 'string' ? p.summary : '';
+    migratedProjects = true;
+  }
+  if (typeof p.summary !== 'undefined') {
+    delete p.summary;
+    migratedProjects = true;
+  }
+  if (typeof p.projectRollingSummary !== 'string') {
+    p.projectRollingSummary = '';
+    migratedProjects = true;
+  }
+  if (typeof p.isCollapsed !== 'boolean') {
+    p.isCollapsed = true;
+    migratedProjects = true;
+  }
 });
 
 function saveProjects() {
   localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
 }
+
+if (migratedProjects) saveProjects();
 
 function makeProjectId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -56,7 +77,13 @@ function getProjectById(id) {
 function createProject() {
   const name = newProjectInput.value.trim();
   if (!name) return;
-  projects.push({ id: makeProjectId(), name, summary: '' });
+  projects.push({
+    id: makeProjectId(),
+    name,
+    projectBackground: '',
+    projectRollingSummary: '',
+    isCollapsed: true
+  });
   saveProjects();
   newProjectInput.value = '';
   renderConversationList();
@@ -69,6 +96,24 @@ newProjectInput.addEventListener('keydown', (e) => {
     createProject();
   }
 });
+
+// ---- UI state (sidebar collapse/expand only — not memory) ----
+
+const UI_STATE_STORAGE_KEY = 'chatlab-ui-state';
+
+let uiState = { otherChatsCollapsed: true };
+try {
+  const storedUiState = JSON.parse(localStorage.getItem(UI_STATE_STORAGE_KEY));
+  if (storedUiState && typeof storedUiState === 'object') {
+    uiState = { otherChatsCollapsed: true, ...storedUiState };
+  }
+} catch (err) {
+  // keep defaults
+}
+
+function saveUiState() {
+  localStorage.setItem(UI_STATE_STORAGE_KEY, JSON.stringify(uiState));
+}
 
 // ---- Conversation history ----
 
@@ -132,6 +177,86 @@ function deleteConversation(id) {
   renderHighlights();
 }
 
+function deleteProject(id) {
+  const idx = projects.findIndex((p) => p.id === id);
+  if (idx === -1) return;
+
+  // Destructive by design: permanently delete every conversation that belongs to
+  // this project (messages, summary, highlights) rather than reassigning them.
+  for (let i = conversations.length - 1; i >= 0; i--) {
+    if (conversations[i].projectId === id) {
+      if (conversations[i].id === currentConversationId) {
+        currentConversationId = null;
+        chatLog.innerHTML = '';
+      }
+      conversations.splice(i, 1);
+    }
+  }
+  saveConversations();
+
+  projects.splice(idx, 1);
+  saveProjects();
+
+  renderConversationList();
+  renderHighlights();
+}
+
+// ---- Shared kebab (three-dot) menu ----
+
+let closeOpenKebabMenu = null;
+
+function createKebabMenu(actions) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'kebab-menu';
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'kebab-btn';
+  btn.textContent = '⋮';
+  btn.setAttribute('aria-label', 'More actions');
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'kebab-dropdown';
+  dropdown.hidden = true;
+
+  actions.forEach((action) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = `kebab-item${action.destructive ? ' destructive' : ''}`;
+    item.textContent = action.label;
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dropdown.hidden = true;
+      closeOpenKebabMenu = null;
+      action.onClick();
+    });
+    dropdown.appendChild(item);
+  });
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = !dropdown.hidden;
+    if (closeOpenKebabMenu) closeOpenKebabMenu();
+    if (!isOpen) {
+      dropdown.hidden = false;
+      closeOpenKebabMenu = () => {
+        dropdown.hidden = true;
+      };
+    }
+  });
+
+  wrapper.appendChild(btn);
+  wrapper.appendChild(dropdown);
+  return wrapper;
+}
+
+document.addEventListener('click', () => {
+  if (closeOpenKebabMenu) {
+    closeOpenKebabMenu();
+    closeOpenKebabMenu = null;
+  }
+});
+
 function renderConversationRow(c) {
   const row = document.createElement('div');
   row.className = 'conversation-row';
@@ -142,18 +267,52 @@ function renderConversationRow(c) {
   item.title = c.title;
   item.addEventListener('click', () => switchConversation(c.id));
 
-  const deleteBtn = document.createElement('button');
-  deleteBtn.type = 'button';
-  deleteBtn.className = 'conversation-delete';
-  deleteBtn.textContent = '×';
-  deleteBtn.setAttribute('aria-label', 'Delete conversation');
-  deleteBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    deleteConversation(c.id);
-  });
+  function startRename() {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'inline-rename-input';
+    input.value = c.title;
+
+    function commit() {
+      const newTitle = input.value.trim();
+      if (newTitle && newTitle !== c.title) {
+        c.title = newTitle;
+        saveConversations();
+      }
+      renderConversationList();
+    }
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commit();
+      } else if (e.key === 'Escape') {
+        renderConversationList();
+      }
+    });
+    input.addEventListener('blur', commit);
+    input.addEventListener('click', (e) => e.stopPropagation());
+
+    row.replaceChild(input, item);
+    input.focus();
+    input.select();
+  }
+
+  const menu = createKebabMenu([
+    { label: 'Rename', onClick: startRename },
+    {
+      label: 'Delete',
+      destructive: true,
+      onClick: () => {
+        if (window.confirm(`Delete conversation "${c.title}"? This cannot be undone.`)) {
+          deleteConversation(c.id);
+        }
+      }
+    }
+  ]);
 
   row.appendChild(item);
-  row.appendChild(deleteBtn);
+  row.appendChild(menu);
   return row;
 }
 
@@ -164,6 +323,10 @@ function renderProjectGroup(project) {
   const header = document.createElement('div');
   header.className = 'project-header';
 
+  const chevron = document.createElement('span');
+  chevron.className = 'project-chevron';
+  chevron.textContent = project.isCollapsed ? '▸' : '▾';
+
   const name = document.createElement('span');
   name.className = 'project-name';
   name.textContent = project.name;
@@ -172,13 +335,13 @@ function renderProjectGroup(project) {
   const actions = document.createElement('div');
   actions.className = 'project-actions';
 
-  const summaryBox = document.createElement('textarea');
-  summaryBox.className = 'project-summary-editor';
-  summaryBox.placeholder = 'Project summary (background context for chats in this project)...';
-  summaryBox.value = project.summary || '';
-  summaryBox.hidden = true;
-  summaryBox.addEventListener('input', () => {
-    project.summary = summaryBox.value;
+  const backgroundBox = document.createElement('textarea');
+  backgroundBox.className = 'project-summary-editor';
+  backgroundBox.placeholder = 'Project background (manual, long-lived context for chats in this project)...';
+  backgroundBox.value = project.projectBackground || '';
+  backgroundBox.hidden = true;
+  backgroundBox.addEventListener('input', () => {
+    project.projectBackground = backgroundBox.value;
     saveProjects();
   });
 
@@ -187,30 +350,91 @@ function renderProjectGroup(project) {
   newChatInProjectBtn.className = 'project-action-btn';
   newChatInProjectBtn.title = 'New chat in this project';
   newChatInProjectBtn.textContent = '+';
-  newChatInProjectBtn.addEventListener('click', () => startNewChatInProject(project.id));
-
-  const editSummaryBtn = document.createElement('button');
-  editSummaryBtn.type = 'button';
-  editSummaryBtn.className = 'project-action-btn';
-  editSummaryBtn.title = 'Edit project summary';
-  editSummaryBtn.textContent = '✎';
-  editSummaryBtn.addEventListener('click', () => {
-    summaryBox.hidden = !summaryBox.hidden;
+  newChatInProjectBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    startNewChatInProject(project.id);
   });
 
+  const editBackgroundBtn = document.createElement('button');
+  editBackgroundBtn.type = 'button';
+  editBackgroundBtn.className = 'project-action-btn';
+  editBackgroundBtn.title = 'Edit project background';
+  editBackgroundBtn.textContent = '✎';
+  editBackgroundBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    backgroundBox.hidden = !backgroundBox.hidden;
+  });
+
+  function startRenameProject() {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'inline-rename-input';
+    input.value = project.name;
+
+    function commit() {
+      const newName = input.value.trim();
+      if (newName && newName !== project.name) {
+        project.name = newName;
+        saveProjects();
+      }
+      renderConversationList();
+    }
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commit();
+      } else if (e.key === 'Escape') {
+        renderConversationList();
+      }
+    });
+    input.addEventListener('blur', commit);
+    input.addEventListener('click', (e) => e.stopPropagation());
+
+    header.replaceChild(input, name);
+    input.focus();
+    input.select();
+  }
+
+  const projectMenu = createKebabMenu([
+    { label: 'Rename', onClick: startRenameProject },
+    {
+      label: 'Delete',
+      destructive: true,
+      onClick: () => {
+        const count = conversations.filter((c) => c.projectId === project.id).length;
+        const warning = count > 0
+          ? `Delete project "${project.name}"? This will permanently delete all ${count} conversation${count === 1 ? '' : 's'} inside it, including their messages, summaries, and highlights. This cannot be undone.`
+          : `Delete project "${project.name}"? This cannot be undone.`;
+        if (window.confirm(warning)) {
+          deleteProject(project.id);
+        }
+      }
+    }
+  ]);
+
   actions.appendChild(newChatInProjectBtn);
-  actions.appendChild(editSummaryBtn);
+  actions.appendChild(editBackgroundBtn);
+  actions.appendChild(projectMenu);
+  header.appendChild(chevron);
   header.appendChild(name);
   header.appendChild(actions);
 
+  header.addEventListener('click', () => {
+    project.isCollapsed = !project.isCollapsed;
+    saveProjects();
+    renderConversationList();
+  });
+
   const convosContainer = document.createElement('div');
   convosContainer.className = 'project-conversations';
+  convosContainer.hidden = project.isCollapsed;
   conversations
     .filter((c) => c.projectId === project.id)
     .forEach((c) => convosContainer.appendChild(renderConversationRow(c)));
 
   group.appendChild(header);
-  group.appendChild(summaryBox);
+  group.appendChild(backgroundBox);
   group.appendChild(convosContainer);
   return group;
 }
@@ -233,13 +457,35 @@ function renderConversationList() {
   const unassigned = conversations.filter((c) => !c.projectId);
 
   if (projects.length > 0 && unassigned.length > 0) {
-    const label = document.createElement('p');
+    const otherChatsHeader = document.createElement('div');
+    otherChatsHeader.className = 'other-chats-header';
+
+    const chevron = document.createElement('span');
+    chevron.className = 'project-chevron';
+    chevron.textContent = uiState.otherChatsCollapsed ? '▸' : '▾';
+
+    const label = document.createElement('span');
     label.className = 'conversation-group-label';
     label.textContent = 'Other chats';
-    conversationList.appendChild(label);
-  }
 
-  unassigned.forEach((c) => conversationList.appendChild(renderConversationRow(c)));
+    otherChatsHeader.appendChild(chevron);
+    otherChatsHeader.appendChild(label);
+    otherChatsHeader.addEventListener('click', () => {
+      uiState.otherChatsCollapsed = !uiState.otherChatsCollapsed;
+      saveUiState();
+      renderConversationList();
+    });
+
+    conversationList.appendChild(otherChatsHeader);
+
+    const otherChatsList = document.createElement('div');
+    otherChatsList.className = 'other-chats-list';
+    otherChatsList.hidden = uiState.otherChatsCollapsed;
+    unassigned.forEach((c) => otherChatsList.appendChild(renderConversationRow(c)));
+    conversationList.appendChild(otherChatsList);
+  } else {
+    unassigned.forEach((c) => conversationList.appendChild(renderConversationRow(c)));
+  }
 }
 
 function renderChatLog(conversation) {
@@ -310,7 +556,17 @@ renderConversationList();
 function buildRequestContext() {
   const conversation = getCurrentConversation();
   if (!conversation) {
-    return { summary: '', recentTurns: [], toSummarize: [], highlights: [], foldPoint: 0, projectSummary: '' };
+    return {
+      summary: '',
+      recentTurns: [],
+      toSummarize: [],
+      highlights: [],
+      foldPoint: 0,
+      projectBackground: '',
+      projectRollingSummary: '',
+      hasProject: false,
+      conversationTitle: ''
+    };
   }
 
   // The current question was already persisted as the last message; it's sent
@@ -335,9 +591,20 @@ function buildRequestContext() {
   const highlights = (conversation.highlights || []).map((h) => ({ text: h.text, note: h.note }));
 
   const project = conversation.projectId ? getProjectById(conversation.projectId) : null;
-  const projectSummary = project ? (project.summary || '') : '';
+  const projectBackground = project ? (project.projectBackground || '') : '';
+  const projectRollingSummary = project ? (project.projectRollingSummary || '') : '';
 
-  return { summary: conversation.summary || '', recentTurns, toSummarize, highlights, foldPoint, projectSummary };
+  return {
+    summary: conversation.summary || '',
+    recentTurns,
+    toSummarize,
+    highlights,
+    foldPoint,
+    projectBackground,
+    projectRollingSummary,
+    hasProject: !!project,
+    conversationTitle: conversation.title
+  };
 }
 
 async function sendMessage() {
@@ -359,7 +626,10 @@ async function sendMessage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         question,
-        projectSummary: context.projectSummary,
+        projectBackground: context.projectBackground,
+        projectRollingSummary: context.projectRollingSummary,
+        hasProject: context.hasProject,
+        conversationTitle: context.conversationTitle,
         summary: context.summary,
         recentTurns: context.recentTurns,
         toSummarize: context.toSummarize,
@@ -384,6 +654,15 @@ async function sendMessage() {
           conversation.summarizedCount = context.foldPoint;
         }
         saveConversations();
+
+        // Project rolling summary only advances when the conversation-level fold fires.
+        if (conversation.projectId && context.toSummarize.length > 0) {
+          const project = getProjectById(conversation.projectId);
+          if (project) {
+            project.projectRollingSummary = data.projectRollingSummary || project.projectRollingSummary || '';
+            saveProjects();
+          }
+        }
       }
     }
   } catch (err) {

@@ -45,11 +45,17 @@ def sanitize_highlights(value):
     return highlights
 
 
-def build_context_messages(project_summary, summary, highlights, recent_turns):
+def build_context_messages(project_background, project_rolling_summary, summary, highlights, recent_turns):
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    if project_summary:
-        messages.append({"role": "system", "content": f"Project background:\n{project_summary}"})
+    if project_background:
+        messages.append({"role": "system", "content": f"Project background:\n{project_background}"})
+
+    if project_rolling_summary:
+        messages.append({
+            "role": "system",
+            "content": f"Project memory across conversations:\n{project_rolling_summary}"
+        })
 
     if summary:
         messages.append({"role": "system", "content": f"Summary of earlier conversation:\n{summary}"})
@@ -87,6 +93,24 @@ def update_summary(existing_summary, turns_to_fold):
     return completion.choices[0].message.content.strip()
 
 
+def update_project_summary(existing_project_rolling_summary, conversation_title, conversation_summary):
+    prompt = (
+        "You maintain a running summary of what's known across multiple conversations "
+        "within the same project. Update the project summary to incorporate the latest "
+        "summary of one conversation below. If that conversation was already reflected "
+        "in the project summary, update that part instead of duplicating it. Keep the "
+        "result concise.\n\n"
+        f"Existing project summary:\n{existing_project_rolling_summary or '(none yet)'}\n\n"
+        f"Conversation \"{conversation_title}\" now summarizes as:\n{conversation_summary}\n\n"
+        "Return only the updated project summary text."
+    )
+    completion = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return completion.choices[0].message.content.strip()
+
+
 @app.route("/")
 def index():
     return redirect("/index.html")
@@ -100,15 +124,28 @@ def chat():
     if not question or not isinstance(question, str):
         return jsonify({"error": "Please provide a question."}), 400
 
-    project_summary = data.get("projectSummary")
-    if not isinstance(project_summary, str):
-        project_summary = ""
+    project_background = data.get("projectBackground")
+    if not isinstance(project_background, str):
+        project_background = ""
+
+    project_rolling_summary = data.get("projectRollingSummary")
+    if not isinstance(project_rolling_summary, str):
+        project_rolling_summary = ""
+
+    has_project = bool(data.get("hasProject"))
+
+    conversation_title = data.get("conversationTitle")
+    if not isinstance(conversation_title, str):
+        conversation_title = ""
+
     summary = data.get("summary") or ""
     recent_turns = sanitize_turns(data.get("recentTurns"))
     highlights = sanitize_highlights(data.get("highlights"))
     to_summarize = sanitize_turns(data.get("toSummarize"))
 
-    messages = build_context_messages(project_summary, summary, highlights, recent_turns)
+    messages = build_context_messages(
+        project_background, project_rolling_summary, summary, highlights, recent_turns
+    )
     messages.append({"role": "user", "content": question})
 
     try:
@@ -122,13 +159,27 @@ def chat():
         return jsonify({"error": "Something went wrong calling the OpenAI API."}), 500
 
     updated_summary = summary
+    updated_project_rolling_summary = project_rolling_summary
+
     if to_summarize:
         try:
             updated_summary = update_summary(summary, to_summarize)
         except Exception as e:
             print(f"Summary update error: {e}")
 
-    return jsonify({"answer": answer, "summary": updated_summary})
+        if has_project:
+            try:
+                updated_project_rolling_summary = update_project_summary(
+                    project_rolling_summary, conversation_title, updated_summary
+                )
+            except Exception as e:
+                print(f"Project summary update error: {e}")
+
+    return jsonify({
+        "answer": answer,
+        "summary": updated_summary,
+        "projectRollingSummary": updated_project_rolling_summary
+    })
 
 
 if __name__ == "__main__":
