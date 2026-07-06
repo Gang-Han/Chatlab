@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+run_pid.txt
+run_stdout.log
+run_stderr.log
