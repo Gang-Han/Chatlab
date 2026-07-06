@@ -9,6 +9,11 @@
 <body>
   <div class="app">
     <header class="app-header">
+      <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Toggle conversation history">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
       <h1>ChatLab</h1>
       <button id="highlights-toggle" class="highlights-toggle" type="button">
         Highlights <span id="highlight-count" class="highlight-count">0</span>
@@ -16,6 +21,16 @@
     </header>
 
     <div class="app-body">
+      <aside id="sidebar" class="sidebar">
+        <button id="new-chat-btn" class="new-chat-button" type="button">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          New Chat
+        </button>
+        <div id="conversation-list" class="conversation-list"></div>
+      </aside>
+
       <div class="main-column">
         <main id="chat-log" class="chat-log"></main>
 

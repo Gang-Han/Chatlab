@@ -24,11 +24,116 @@ function addMessage(text, role) {
   return row;
 }
 
+// ---- Conversation history ----
+
+const CONVERSATIONS_STORAGE_KEY = 'chatlab-conversations';
+
+const sidebar = document.getElementById('sidebar');
+const sidebarToggle = document.getElementById('sidebar-toggle');
+const newChatBtn = document.getElementById('new-chat-btn');
+const conversationList = document.getElementById('conversation-list');
+
+let conversations = [];
+try {
+  conversations = JSON.parse(localStorage.getItem(CONVERSATIONS_STORAGE_KEY)) || [];
+} catch (err) {
+  conversations = [];
+}
+
+let currentConversationId = conversations.length > 0 ? conversations[0].id : null;
+
+function saveConversations() {
+  localStorage.setItem(CONVERSATIONS_STORAGE_KEY, JSON.stringify(conversations));
+}
+
+function makeConversationId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function titleFromMessage(text) {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > 40 ? `${flat.slice(0, 40)}...` : flat || 'New chat';
+}
+
+function getCurrentConversation() {
+  return conversations.find((c) => c.id === currentConversationId) || null;
+}
+
+function renderConversationList() {
+  conversationList.innerHTML = '';
+
+  if (conversations.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'conversation-empty';
+    empty.textContent = 'No conversations yet.';
+    conversationList.appendChild(empty);
+    return;
+  }
+
+  conversations.forEach((c) => {
+    const item = document.createElement('div');
+    item.className = `conversation-item${c.id === currentConversationId ? ' active' : ''}`;
+    item.textContent = c.title;
+    item.title = c.title;
+    item.addEventListener('click', () => switchConversation(c.id));
+    conversationList.appendChild(item);
+  });
+}
+
+function renderChatLog(conversation) {
+  chatLog.innerHTML = '';
+  if (!conversation) return;
+  conversation.messages.forEach((m) => addMessage(m.text, m.role));
+}
+
+function switchConversation(id) {
+  if (id === currentConversationId) return;
+  currentConversationId = id;
+  renderChatLog(getCurrentConversation());
+  renderConversationList();
+  sidebar.classList.remove('open');
+}
+
+function startNewChat() {
+  currentConversationId = null;
+  chatLog.innerHTML = '';
+  renderConversationList();
+  sidebar.classList.remove('open');
+  textarea.focus();
+}
+
+function persistMessage(text, role) {
+  let conversation = getCurrentConversation();
+
+  if (!conversation) {
+    conversation = {
+      id: makeConversationId(),
+      title: titleFromMessage(text),
+      messages: [],
+      updatedAt: new Date().toISOString()
+    };
+    conversations.unshift(conversation);
+    currentConversationId = conversation.id;
+  }
+
+  conversation.messages.push({ text, role });
+  conversation.updatedAt = new Date().toISOString();
+  saveConversations();
+  renderConversationList();
+}
+
+newChatBtn.addEventListener('click', startNewChat);
+sidebarToggle.addEventListener('click', () => sidebar.classList.toggle('open'));
+
+renderChatLog(getCurrentConversation());
+renderConversationList();
+
 async function sendMessage() {
   const question = textarea.value.trim();
   if (!question) return;
 
   addMessage(question, 'user');
+  persistMessage(question, 'user');
   textarea.value = '';
   autoResize();
   button.disabled = true;
@@ -47,12 +152,15 @@ async function sendMessage() {
 
     if (!response.ok) {
       addMessage(data.error, 'error');
+      persistMessage(data.error, 'error');
     } else {
       addMessage(data.answer, 'bot');
+      persistMessage(data.answer, 'bot');
     }
   } catch (err) {
     pendingRow.remove();
     addMessage('Could not reach the server.', 'error');
+    persistMessage('Could not reach the server.', 'error');
   } finally {
     button.disabled = false;
     textarea.focus();
