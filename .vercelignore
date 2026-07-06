@@ -5,4 +5,4 @@ __pycache__/
 run_pid.txt
 run_stdout.log
 run_stderr.log
-.vercel
+Start ChatLab.bat
