@@ -111,6 +111,36 @@ def update_project_summary(existing_project_rolling_summary, conversation_title,
     return completion.choices[0].message.content.strip()
 
 
+BTW_SYSTEM_PROMPT = (
+    "You are ChatLab, answering a quick temporary side question about one specific "
+    "assistant response. This is a side conversation, separate from the main chat."
+)
+
+
+def build_btw_messages(project_background, project_rolling_summary, summary, anchor_text, btw_turns):
+    messages = [{"role": "system", "content": BTW_SYSTEM_PROMPT}]
+
+    if project_background:
+        messages.append({"role": "system", "content": f"Project background:\n{project_background}"})
+
+    if project_rolling_summary:
+        messages.append({
+            "role": "system",
+            "content": f"Project memory across conversations:\n{project_rolling_summary}"
+        })
+
+    if summary:
+        messages.append({"role": "system", "content": f"Summary of earlier conversation:\n{summary}"})
+
+    messages.append({
+        "role": "system",
+        "content": f"The user is asking about this specific assistant response:\n{anchor_text}"
+    })
+
+    messages.extend(btw_turns)
+    return messages
+
+
 @app.route("/")
 def index():
     return redirect("/index.html")
@@ -180,6 +210,47 @@ def chat():
         "summary": updated_summary,
         "projectRollingSummary": updated_project_rolling_summary
     })
+
+
+@app.route("/api/btw", methods=["POST"])
+def btw():
+    data = request.get_json(silent=True) or {}
+    question = data.get("question")
+
+    if not question or not isinstance(question, str):
+        return jsonify({"error": "Please provide a question."}), 400
+
+    project_background = data.get("projectBackground")
+    if not isinstance(project_background, str):
+        project_background = ""
+
+    project_rolling_summary = data.get("projectRollingSummary")
+    if not isinstance(project_rolling_summary, str):
+        project_rolling_summary = ""
+
+    summary = data.get("summary") or ""
+
+    anchor_text = data.get("anchorText")
+    if not isinstance(anchor_text, str):
+        anchor_text = ""
+
+    btw_turns = sanitize_turns(data.get("btwTurns"))
+
+    messages = build_btw_messages(project_background, project_rolling_summary, summary, anchor_text, btw_turns)
+    messages.append({"role": "user", "content": question})
+
+    try:
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+        )
+        answer = completion.choices[0].message.content
+    except Exception as e:
+        print(f"BTW OpenAI API error: {e}")
+        return jsonify({"error": "Something went wrong calling the OpenAI API."}), 500
+
+    # Deliberately no summary/project-summary update: BTW never touches main memory.
+    return jsonify({"answer": answer})
 
 
 if __name__ == "__main__":

@@ -19,6 +19,21 @@ function addMessage(text, role) {
   bubble.textContent = text;
 
   row.appendChild(bubble);
+
+  if (role === 'bot') {
+    const actions = document.createElement('div');
+    actions.className = 'message-actions';
+
+    const btwBtn = document.createElement('button');
+    btwBtn.type = 'button';
+    btwBtn.className = 'btw-trigger';
+    btwBtn.textContent = 'BTW';
+    btwBtn.addEventListener('click', () => openBtwPanel(text));
+
+    actions.appendChild(btwBtn);
+    row.appendChild(actions);
+  }
+
   chatLog.appendChild(row);
   chatLog.scrollTop = chatLog.scrollHeight;
   return row;
@@ -496,6 +511,7 @@ function renderChatLog(conversation) {
 
 function switchConversation(id) {
   if (id === currentConversationId) return;
+  closeBtwPanel();
   currentConversationId = id;
   renderChatLog(getCurrentConversation());
   renderConversationList();
@@ -504,6 +520,7 @@ function switchConversation(id) {
 }
 
 function startNewChat() {
+  closeBtwPanel();
   currentConversationId = null;
   draftProjectId = null;
   chatLog.innerHTML = '';
@@ -514,6 +531,7 @@ function startNewChat() {
 }
 
 function startNewChatInProject(projectId) {
+  closeBtwPanel();
   currentConversationId = null;
   draftProjectId = projectId;
   chatLog.innerHTML = '';
@@ -690,6 +708,156 @@ textarea.addEventListener('keydown', (e) => {
   // Plain Enter is left to the browser's default behavior, which inserts a newline in a textarea.
 });
 
+// ---- BTW (temporary side-chat about one specific response) ----
+//
+// Strictly isolated from main conversation memory: btwState lives only in this
+// module's memory, is never persisted to localStorage, and is never written into
+// conversation.messages, conversation.summary, summarizedCount, highlights, or
+// projectRollingSummary. It never touches persistMessage() or saveConversations().
+
+const btwBackdrop = document.getElementById('btw-backdrop');
+const btwPanel = document.getElementById('btw-panel');
+const btwTurnsEl = document.getElementById('btw-turns');
+const btwForm = document.getElementById('btw-form');
+const btwInput = document.getElementById('btw-input');
+const btwClose = document.getElementById('btw-close');
+const btwSendButton = btwForm.querySelector('button');
+
+let btwState = null; // null when the panel is closed; { anchorText, turns: [{role, text}] } when open
+
+function renderBtwTurns() {
+  btwTurnsEl.innerHTML = '';
+  if (!btwState) return;
+
+  btwState.turns.forEach((t) => {
+    const row = document.createElement('div');
+    row.className = `btw-turn-row ${t.role}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'btw-turn-bubble';
+    bubble.textContent = t.text;
+
+    row.appendChild(bubble);
+    btwTurnsEl.appendChild(row);
+  });
+
+  btwTurnsEl.scrollTop = btwTurnsEl.scrollHeight;
+}
+
+function openBtwPanel(responseText) {
+  btwState = { anchorText: responseText, turns: [] };
+  renderBtwTurns();
+  btwBackdrop.hidden = false;
+  btwPanel.hidden = false;
+  btwInput.value = '';
+  btwInput.focus();
+}
+
+function closeBtwPanel() {
+  btwState = null;
+  btwBackdrop.hidden = true;
+  btwPanel.hidden = true;
+  btwTurnsEl.innerHTML = '';
+  btwInput.value = '';
+}
+
+btwBackdrop.addEventListener('click', closeBtwPanel);
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && btwState) {
+    closeBtwPanel();
+  }
+});
+
+btwInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.shiftKey) {
+    e.preventDefault();
+    sendBtwMessage();
+  }
+  // Plain Enter is left to the browser's default behavior, which inserts a newline.
+});
+
+function buildBtwRequestContext() {
+  const conversation = getCurrentConversation();
+  if (!conversation) {
+    return { projectBackground: '', projectRollingSummary: '', summary: '' };
+  }
+
+  const project = conversation.projectId ? getProjectById(conversation.projectId) : null;
+
+  return {
+    projectBackground: project ? (project.projectBackground || '') : '',
+    projectRollingSummary: project ? (project.projectRollingSummary || '') : '',
+    summary: conversation.summary || ''
+  };
+}
+
+async function sendBtwMessage() {
+  if (!btwState) return;
+
+  const question = btwInput.value.trim();
+  if (!question) return;
+
+  // Prior turns only — the question itself is sent as a separate field.
+  const priorBtwTurns = btwState.turns.map((t) => ({
+    role: t.role === 'user' ? 'user' : 'assistant',
+    content: t.text
+  }));
+
+  btwState.turns.push({ role: 'user', text: question });
+  renderBtwTurns();
+  btwInput.value = '';
+  btwSendButton.disabled = true;
+
+  btwState.turns.push({ role: 'assistant', text: 'Thinking...' });
+  renderBtwTurns();
+
+  const context = buildBtwRequestContext();
+
+  try {
+    const response = await fetch('/api/btw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question,
+        projectBackground: context.projectBackground,
+        projectRollingSummary: context.projectRollingSummary,
+        summary: context.summary,
+        anchorText: btwState.anchorText,
+        btwTurns: priorBtwTurns
+      })
+    });
+
+    const data = await response.json();
+
+    if (!btwState) return; // panel was closed while the request was in flight
+
+    btwState.turns.pop(); // remove "Thinking..." placeholder
+
+    if (!response.ok) {
+      btwState.turns.push({ role: 'assistant', text: data.error || 'Something went wrong.' });
+    } else {
+      btwState.turns.push({ role: 'assistant', text: data.answer });
+    }
+    renderBtwTurns();
+  } catch (err) {
+    if (!btwState) return;
+    btwState.turns.pop();
+    btwState.turns.push({ role: 'assistant', text: 'Could not reach the server.' });
+    renderBtwTurns();
+  } finally {
+    if (btwState) btwSendButton.disabled = false;
+    btwInput.focus();
+  }
+}
+
+btwForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  sendBtwMessage();
+});
+
+btwClose.addEventListener('click', closeBtwPanel);
+
 // ---- Highlights (scoped per conversation) ----
 
 // Highlights used to be stored globally across all conversations; that data is stale
@@ -781,44 +949,75 @@ function renderHighlights() {
   });
 }
 
-function addHighlight(text) {
+function addHighlight(text, meta) {
   const conversation = getCurrentConversation();
   if (!conversation) return;
 
-  conversation.highlights.push({
+  const source = (meta && meta.source) || 'main';
+
+  const highlight = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     text,
     note: '',
-    timestamp: new Date().toISOString()
-  });
+    timestamp: new Date().toISOString(),
+    source
+  };
+
+  if (source === 'btw' && meta && meta.anchorAssistantText) {
+    highlight.anchorAssistantText = meta.anchorAssistantText;
+  }
+
+  conversation.highlights.push(highlight);
   saveHighlights();
   renderHighlights();
   highlightsPanel.classList.add('open');
 }
 
-function getBotBubbleFromNode(node) {
+// Returns 'main', 'btw', or null depending on whether the given selection node sits
+// inside a highlightable assistant response (main chat bot bubble, or a BTW assistant
+// turn bubble). User-authored text is never highlightable in either context.
+function getHighlightSourceFromNode(node) {
   const el = node && node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
   if (!el || !el.closest) return null;
-  const bubble = el.closest('.bubble');
-  if (!bubble) return null;
-  const row = bubble.closest('.message-row');
-  if (row && row.classList.contains('bot') && !row.classList.contains('pending')) {
-    return bubble;
+
+  const mainBubble = el.closest('.bubble');
+  if (mainBubble) {
+    const row = mainBubble.closest('.message-row');
+    if (row && row.classList.contains('bot') && !row.classList.contains('pending')) {
+      return 'main';
+    }
+    return null;
   }
+
+  const btwBubble = el.closest('.btw-turn-bubble');
+  if (btwBubble) {
+    const row = btwBubble.closest('.btw-turn-row');
+    if (row && row.classList.contains('assistant')) {
+      return 'btw';
+    }
+    return null;
+  }
+
   return null;
 }
 
 function hideSelectionPopup() {
   selectionPopup.hidden = true;
   delete selectionPopup.dataset.text;
+  delete selectionPopup.dataset.source;
 }
 
-function showSelectionPopup(rect, text) {
-  const top = Math.max(rect.top - 40, 8);
+function showSelectionPopup(rect, text, source) {
+  // Inside the BTW modal, the native OS/browser selection toolbar tends to appear
+  // just above the selection — place our popup below it instead so it stays visible.
+  const top = source === 'btw'
+    ? Math.min(rect.bottom + 10, window.innerHeight - 40)
+    : Math.max(rect.top - 40, 8);
   const left = Math.min(Math.max(rect.left, 8), window.innerWidth - 110);
   selectionPopup.style.top = `${top}px`;
   selectionPopup.style.left = `${left}px`;
   selectionPopup.dataset.text = text;
+  selectionPopup.dataset.source = source;
   selectionPopup.hidden = false;
 }
 
@@ -834,14 +1033,14 @@ document.addEventListener('mouseup', (e) => {
       return;
     }
 
-    const bubble = getBotBubbleFromNode(selection.anchorNode);
-    if (!bubble) {
+    const source = getHighlightSourceFromNode(selection.anchorNode);
+    if (!source) {
       hideSelectionPopup();
       return;
     }
 
     const rect = selection.getRangeAt(0).getBoundingClientRect();
-    showSelectionPopup(rect, text);
+    showSelectionPopup(rect, text, source);
   }, 0);
 });
 
@@ -851,8 +1050,13 @@ selectionPopup.addEventListener('mousedown', (e) => {
 
 selectionPopup.addEventListener('click', () => {
   const text = selectionPopup.dataset.text;
+  const source = selectionPopup.dataset.source;
   if (text) {
-    addHighlight(text);
+    if (source === 'btw' && btwState) {
+      addHighlight(text, { source: 'btw', anchorAssistantText: btwState.anchorText });
+    } else {
+      addHighlight(text, { source: 'main' });
+    }
   }
   hideSelectionPopup();
   window.getSelection().removeAllRanges();

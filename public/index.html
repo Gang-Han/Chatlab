@@ -73,6 +73,22 @@
     </div>
 
     <button id="selection-popup" class="selection-popup" type="button" hidden>+ Highlight</button>
+
+    <div id="btw-backdrop" class="btw-backdrop" hidden></div>
+
+    <div id="btw-panel" class="btw-panel" hidden role="dialog" aria-modal="true" aria-label="BTW side conversation">
+      <div class="btw-panel-header">
+        <span class="btw-panel-title">BTW</span>
+        <button id="btw-close" class="btw-close" type="button" aria-label="Close BTW panel">&times;</button>
+      </div>
+
+      <div id="btw-turns" class="btw-turns"></div>
+
+      <form id="btw-form" class="btw-input-row">
+        <textarea id="btw-input" class="btw-input" rows="2" placeholder="Ask about this response... (Shift+Enter to send)"></textarea>
+        <button type="submit" class="btw-send-button">Send</button>
+      </form>
+    </div>
   </div>
   <script src="script.js"></script>
 </body>
