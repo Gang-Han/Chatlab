@@ -24,6 +24,52 @@ function addMessage(text, role) {
   return row;
 }
 
+// ---- Projects ----
+
+const PROJECTS_STORAGE_KEY = 'chatlab-projects';
+
+const newProjectInput = document.getElementById('new-project-input');
+const newProjectBtn = document.getElementById('new-project-btn');
+
+let projects = [];
+try {
+  projects = JSON.parse(localStorage.getItem(PROJECTS_STORAGE_KEY)) || [];
+} catch (err) {
+  projects = [];
+}
+projects.forEach((p) => {
+  if (typeof p.summary !== 'string') p.summary = '';
+});
+
+function saveProjects() {
+  localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+}
+
+function makeProjectId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getProjectById(id) {
+  return projects.find((p) => p.id === id) || null;
+}
+
+function createProject() {
+  const name = newProjectInput.value.trim();
+  if (!name) return;
+  projects.push({ id: makeProjectId(), name, summary: '' });
+  saveProjects();
+  newProjectInput.value = '';
+  renderConversationList();
+}
+
+newProjectBtn.addEventListener('click', createProject);
+newProjectInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    createProject();
+  }
+});
+
 // ---- Conversation history ----
 
 const CONVERSATIONS_STORAGE_KEY = 'chatlab-conversations';
@@ -40,7 +86,18 @@ try {
   conversations = [];
 }
 
+// Conversations saved before per-conversation highlights/summary/project existed won't have these fields yet.
+conversations.forEach((c) => {
+  if (!Array.isArray(c.highlights)) c.highlights = [];
+  if (typeof c.summary !== 'string') c.summary = '';
+  if (typeof c.summarizedCount !== 'number') c.summarizedCount = 0;
+  if (typeof c.projectId === 'undefined') c.projectId = null;
+});
+
+const RECENT_WINDOW = 6;
+
 let currentConversationId = conversations.length > 0 ? conversations[0].id : null;
+let draftProjectId = null;
 
 function saveConversations() {
   localStorage.setItem(CONVERSATIONS_STORAGE_KEY, JSON.stringify(conversations));
@@ -59,10 +116,109 @@ function getCurrentConversation() {
   return conversations.find((c) => c.id === currentConversationId) || null;
 }
 
+function deleteConversation(id) {
+  const idx = conversations.findIndex((c) => c.id === id);
+  if (idx === -1) return;
+
+  conversations.splice(idx, 1);
+  saveConversations();
+
+  if (currentConversationId === id) {
+    currentConversationId = null;
+    chatLog.innerHTML = '';
+  }
+
+  renderConversationList();
+  renderHighlights();
+}
+
+function renderConversationRow(c) {
+  const row = document.createElement('div');
+  row.className = 'conversation-row';
+
+  const item = document.createElement('div');
+  item.className = `conversation-item${c.id === currentConversationId ? ' active' : ''}`;
+  item.textContent = c.title;
+  item.title = c.title;
+  item.addEventListener('click', () => switchConversation(c.id));
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'conversation-delete';
+  deleteBtn.textContent = '×';
+  deleteBtn.setAttribute('aria-label', 'Delete conversation');
+  deleteBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    deleteConversation(c.id);
+  });
+
+  row.appendChild(item);
+  row.appendChild(deleteBtn);
+  return row;
+}
+
+function renderProjectGroup(project) {
+  const group = document.createElement('div');
+  group.className = 'project-group';
+
+  const header = document.createElement('div');
+  header.className = 'project-header';
+
+  const name = document.createElement('span');
+  name.className = 'project-name';
+  name.textContent = project.name;
+  name.title = project.name;
+
+  const actions = document.createElement('div');
+  actions.className = 'project-actions';
+
+  const summaryBox = document.createElement('textarea');
+  summaryBox.className = 'project-summary-editor';
+  summaryBox.placeholder = 'Project summary (background context for chats in this project)...';
+  summaryBox.value = project.summary || '';
+  summaryBox.hidden = true;
+  summaryBox.addEventListener('input', () => {
+    project.summary = summaryBox.value;
+    saveProjects();
+  });
+
+  const newChatInProjectBtn = document.createElement('button');
+  newChatInProjectBtn.type = 'button';
+  newChatInProjectBtn.className = 'project-action-btn';
+  newChatInProjectBtn.title = 'New chat in this project';
+  newChatInProjectBtn.textContent = '+';
+  newChatInProjectBtn.addEventListener('click', () => startNewChatInProject(project.id));
+
+  const editSummaryBtn = document.createElement('button');
+  editSummaryBtn.type = 'button';
+  editSummaryBtn.className = 'project-action-btn';
+  editSummaryBtn.title = 'Edit project summary';
+  editSummaryBtn.textContent = '✎';
+  editSummaryBtn.addEventListener('click', () => {
+    summaryBox.hidden = !summaryBox.hidden;
+  });
+
+  actions.appendChild(newChatInProjectBtn);
+  actions.appendChild(editSummaryBtn);
+  header.appendChild(name);
+  header.appendChild(actions);
+
+  const convosContainer = document.createElement('div');
+  convosContainer.className = 'project-conversations';
+  conversations
+    .filter((c) => c.projectId === project.id)
+    .forEach((c) => convosContainer.appendChild(renderConversationRow(c)));
+
+  group.appendChild(header);
+  group.appendChild(summaryBox);
+  group.appendChild(convosContainer);
+  return group;
+}
+
 function renderConversationList() {
   conversationList.innerHTML = '';
 
-  if (conversations.length === 0) {
+  if (projects.length === 0 && conversations.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'conversation-empty';
     empty.textContent = 'No conversations yet.';
@@ -70,14 +226,20 @@ function renderConversationList() {
     return;
   }
 
-  conversations.forEach((c) => {
-    const item = document.createElement('div');
-    item.className = `conversation-item${c.id === currentConversationId ? ' active' : ''}`;
-    item.textContent = c.title;
-    item.title = c.title;
-    item.addEventListener('click', () => switchConversation(c.id));
-    conversationList.appendChild(item);
+  projects.forEach((project) => {
+    conversationList.appendChild(renderProjectGroup(project));
   });
+
+  const unassigned = conversations.filter((c) => !c.projectId);
+
+  if (projects.length > 0 && unassigned.length > 0) {
+    const label = document.createElement('p');
+    label.className = 'conversation-group-label';
+    label.textContent = 'Other chats';
+    conversationList.appendChild(label);
+  }
+
+  unassigned.forEach((c) => conversationList.appendChild(renderConversationRow(c)));
 }
 
 function renderChatLog(conversation) {
@@ -91,13 +253,26 @@ function switchConversation(id) {
   currentConversationId = id;
   renderChatLog(getCurrentConversation());
   renderConversationList();
+  renderHighlights();
   sidebar.classList.remove('open');
 }
 
 function startNewChat() {
   currentConversationId = null;
+  draftProjectId = null;
   chatLog.innerHTML = '';
   renderConversationList();
+  renderHighlights();
+  sidebar.classList.remove('open');
+  textarea.focus();
+}
+
+function startNewChatInProject(projectId) {
+  currentConversationId = null;
+  draftProjectId = projectId;
+  chatLog.innerHTML = '';
+  renderConversationList();
+  renderHighlights();
   sidebar.classList.remove('open');
   textarea.focus();
 }
@@ -110,6 +285,10 @@ function persistMessage(text, role) {
       id: makeConversationId(),
       title: titleFromMessage(text),
       messages: [],
+      highlights: [],
+      summary: '',
+      summarizedCount: 0,
+      projectId: draftProjectId,
       updatedAt: new Date().toISOString()
     };
     conversations.unshift(conversation);
@@ -128,12 +307,46 @@ sidebarToggle.addEventListener('click', () => sidebar.classList.toggle('open'));
 renderChatLog(getCurrentConversation());
 renderConversationList();
 
+function buildRequestContext() {
+  const conversation = getCurrentConversation();
+  if (!conversation) {
+    return { summary: '', recentTurns: [], toSummarize: [], highlights: [], foldPoint: 0, projectSummary: '' };
+  }
+
+  // The current question was already persisted as the last message; it's sent
+  // separately as `question`, so only messages before it count as prior context.
+  const priorMessages = conversation.messages
+    .filter((m) => m.role === 'user' || m.role === 'bot')
+    .slice(0, -1);
+
+  const toRole = (m) => (m.role === 'bot' ? 'assistant' : 'user');
+
+  const foldPoint = Math.max(priorMessages.length - RECENT_WINDOW, 0);
+  const summarizedCount = conversation.summarizedCount || 0;
+
+  const recentTurns = priorMessages
+    .slice(-RECENT_WINDOW)
+    .map((m) => ({ role: toRole(m), content: m.text }));
+
+  const toSummarize = priorMessages
+    .slice(summarizedCount, foldPoint)
+    .map((m) => ({ role: toRole(m), content: m.text }));
+
+  const highlights = (conversation.highlights || []).map((h) => ({ text: h.text, note: h.note }));
+
+  const project = conversation.projectId ? getProjectById(conversation.projectId) : null;
+  const projectSummary = project ? (project.summary || '') : '';
+
+  return { summary: conversation.summary || '', recentTurns, toSummarize, highlights, foldPoint, projectSummary };
+}
+
 async function sendMessage() {
   const question = textarea.value.trim();
   if (!question) return;
 
   addMessage(question, 'user');
   persistMessage(question, 'user');
+  const context = buildRequestContext();
   textarea.value = '';
   autoResize();
   button.disabled = true;
@@ -144,7 +357,14 @@ async function sendMessage() {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question })
+      body: JSON.stringify({
+        question,
+        projectSummary: context.projectSummary,
+        summary: context.summary,
+        recentTurns: context.recentTurns,
+        toSummarize: context.toSummarize,
+        highlights: context.highlights
+      })
     });
 
     const data = await response.json();
@@ -156,6 +376,15 @@ async function sendMessage() {
     } else {
       addMessage(data.answer, 'bot');
       persistMessage(data.answer, 'bot');
+
+      const conversation = getCurrentConversation();
+      if (conversation) {
+        conversation.summary = data.summary || conversation.summary || '';
+        if (context.toSummarize.length > 0) {
+          conversation.summarizedCount = context.foldPoint;
+        }
+        saveConversations();
+      }
     }
   } catch (err) {
     pendingRow.remove();
@@ -182,9 +411,11 @@ textarea.addEventListener('keydown', (e) => {
   // Plain Enter is left to the browser's default behavior, which inserts a newline in a textarea.
 });
 
-// ---- Highlights ----
+// ---- Highlights (scoped per conversation) ----
 
-const HIGHLIGHTS_STORAGE_KEY = 'chatlab-highlights';
+// Highlights used to be stored globally across all conversations; that data is stale
+// now that each conversation owns its own highlights, so drop it.
+localStorage.removeItem('chatlab-highlights');
 
 const highlightsPanel = document.getElementById('highlights-panel');
 const highlightsToggle = document.getElementById('highlights-toggle');
@@ -195,15 +426,13 @@ const generateNoteBtn = document.getElementById('generate-note-btn');
 const generatedNote = document.getElementById('generated-note');
 const selectionPopup = document.getElementById('selection-popup');
 
-let highlights = [];
-try {
-  highlights = JSON.parse(localStorage.getItem(HIGHLIGHTS_STORAGE_KEY)) || [];
-} catch (err) {
-  highlights = [];
+function getCurrentHighlights() {
+  const conversation = getCurrentConversation();
+  return conversation ? conversation.highlights : [];
 }
 
 function saveHighlights() {
-  localStorage.setItem(HIGHLIGHTS_STORAGE_KEY, JSON.stringify(highlights));
+  saveConversations();
 }
 
 function formatTimestamp(iso) {
@@ -217,6 +446,8 @@ function formatTimestamp(iso) {
 }
 
 function renderHighlights() {
+  const highlights = getCurrentHighlights();
+  const conversation = getCurrentConversation();
   highlightCountEl.textContent = highlights.length;
   highlightsList.innerHTML = '';
 
@@ -256,7 +487,7 @@ function renderHighlights() {
     removeBtn.className = 'highlight-remove';
     removeBtn.textContent = 'Remove';
     removeBtn.addEventListener('click', () => {
-      highlights = highlights.filter((x) => x.id !== h.id);
+      conversation.highlights = conversation.highlights.filter((x) => x.id !== h.id);
       saveHighlights();
       renderHighlights();
     });
@@ -272,7 +503,10 @@ function renderHighlights() {
 }
 
 function addHighlight(text) {
-  highlights.push({
+  const conversation = getCurrentConversation();
+  if (!conversation) return;
+
+  conversation.highlights.push({
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     text,
     note: '',
@@ -354,6 +588,8 @@ highlightsClose.addEventListener('click', () => {
 });
 
 generateNoteBtn.addEventListener('click', () => {
+  const highlights = getCurrentHighlights();
+
   if (highlights.length === 0) {
     generatedNote.value = 'No highlights yet. Select text in a response to add one.';
     generatedNote.hidden = false;
