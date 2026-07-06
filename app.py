@@ -2,7 +2,7 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, redirect, request
 from openai import OpenAI
 
 load_dotenv()
@@ -19,7 +19,7 @@ app = Flask(__name__, static_folder="public", static_url_path="")
 
 @app.route("/")
 def index():
-    return send_from_directory(app.static_folder, "index.html")
+    return redirect("/index.html")
 
 
 @app.route("/api/chat", methods=["POST"])
