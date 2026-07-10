@@ -701,11 +701,11 @@ form.addEventListener('submit', (e) => {
 textarea.addEventListener('input', autoResize);
 
 textarea.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.shiftKey) {
+  if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     sendMessage();
   }
-  // Plain Enter is left to the browser's default behavior, which inserts a newline in a textarea.
+  // Shift+Enter is left to the browser's default behavior, which inserts a newline in a textarea.
 });
 
 // ---- BTW (temporary side-chat about one specific response) ----
@@ -867,9 +867,11 @@ localStorage.removeItem('chatlab-highlights');
 const highlightsPanel = document.getElementById('highlights-panel');
 const highlightsToggle = document.getElementById('highlights-toggle');
 const highlightsClose = document.getElementById('highlights-close');
+const highlightsPanelTitle = document.getElementById('highlights-panel-title');
 const highlightsList = document.getElementById('highlights-list');
 const highlightCountEl = document.getElementById('highlight-count');
 const generateNoteBtn = document.getElementById('generate-note-btn');
+const generateNoteLabel = document.getElementById('generate-note-label');
 const generatedNote = document.getElementById('generated-note');
 const selectionPopup = document.getElementById('selection-popup');
 
@@ -896,6 +898,20 @@ function renderHighlights() {
   const highlights = getCurrentHighlights();
   const conversation = getCurrentConversation();
   highlightCountEl.textContent = highlights.length;
+
+  if (highlightsPanelTitle) {
+    highlightsPanelTitle.textContent = highlights.length > 0
+      ? `Highlights · ${highlights.length}`
+      : 'Highlights';
+  }
+
+  if (generateNoteLabel) {
+    generateNoteLabel.textContent = highlights.length > 0
+      ? `Generate Note · ${highlights.length} highlight${highlights.length === 1 ? '' : 's'}`
+      : 'Generate Note';
+  }
+  generateNoteBtn.disabled = highlights.length === 0;
+
   highlightsList.innerHTML = '';
 
   if (highlights.length === 0) {
@@ -926,21 +942,33 @@ function renderHighlights() {
     const meta = document.createElement('div');
     meta.className = 'highlight-meta';
 
+    const dragHandle = document.createElement('span');
+    dragHandle.className = 'highlight-drag-handle';
+    dragHandle.setAttribute('aria-hidden', 'true');
+    dragHandle.textContent = '⋮⋮';
+
+    const metaRight = document.createElement('div');
+    metaRight.className = 'highlight-meta-right';
+
     const time = document.createElement('span');
     time.textContent = formatTimestamp(h.timestamp);
 
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'highlight-remove';
-    removeBtn.textContent = 'Remove';
+    removeBtn.setAttribute('aria-label', 'Remove highlight');
+    removeBtn.title = 'Remove highlight';
+    removeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     removeBtn.addEventListener('click', () => {
       conversation.highlights = conversation.highlights.filter((x) => x.id !== h.id);
       saveHighlights();
       renderHighlights();
     });
 
-    meta.appendChild(time);
-    meta.appendChild(removeBtn);
+    metaRight.appendChild(time);
+    metaRight.appendChild(removeBtn);
+    meta.appendChild(dragHandle);
+    meta.appendChild(metaRight);
 
     item.appendChild(quote);
     item.appendChild(note);
