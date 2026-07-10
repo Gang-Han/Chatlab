@@ -29,8 +29,12 @@
           New Chat
         </button>
         <div class="new-project-form">
-          <input id="new-project-input" class="new-project-input" type="text" placeholder="New project name" />
-          <button id="new-project-btn" class="new-project-button" type="button">+ Add</button>
+          <input id="new-project-input" class="new-project-input" type="text" placeholder="New project name" aria-label="New project name" />
+          <button id="new-project-btn" class="new-project-button" type="button" aria-label="Add project" title="Add project">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
         </div>
         <div id="conversation-list" class="conversation-list"></div>
       </aside>
@@ -53,20 +57,26 @@
               </svg>
             </button>
           </form>
-          <p class="composer-hint">Enter for a new line &middot; Shift+Enter to send</p>
+          <p class="composer-hint">Enter to send &middot; Shift + Enter for new line</p>
         </footer>
       </div>
 
       <aside id="highlights-panel" class="highlights-panel">
         <div class="highlights-panel-header">
-          <h2>Highlights</h2>
+          <h2 id="highlights-panel-title">Highlights</h2>
           <button id="highlights-close" class="highlights-close" type="button" aria-label="Close highlights panel">&times;</button>
         </div>
 
         <div id="highlights-list" class="highlights-list"></div>
 
         <div class="highlights-actions">
-          <button id="generate-note-btn" type="button" class="generate-note-button">Generate Note from Highlights</button>
+          <button id="generate-note-btn" type="button" class="generate-note-button">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14" aria-hidden="true">
+              <path d="M6 3h9l3 3v15H6z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+              <path d="M9 9h6M9 13h6M9 17h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+            <span id="generate-note-label" class="generate-note-label">Generate Note</span>
+          </button>
           <textarea id="generated-note" class="generated-note" readonly hidden></textarea>
         </div>
       </aside>
